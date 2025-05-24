@@ -1,6 +1,19 @@
-import { useState } from "react";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { useState, useEffect, useRef } from "react"; // Added useRef for potential future use, though not directly used in quiz
+import {
+  collection,
+  addDoc,
+  serverTimestamp,
+  query, // Added query
+  orderBy, // Added orderBy
+  limit, // Added limit
+  onSnapshot, // Added onSnapshot
+} from "firebase/firestore";
 import MessageBox from "../utils/MessageBox";
+import allQuizQuestions from "../data/QuizQuestions";
+
+
+// Number of questions to display per quiz session
+const NUMBER_OF_QUIZ_QUESTIONS = 7;
 
 // Quiz Page Component
 const QuizPage = ({ db, userId }) => {
@@ -10,86 +23,84 @@ const QuizPage = ({ db, userId }) => {
   const [userAnswers, setUserAnswers] = useState([]);
   const [showMessageBox, setShowMessageBox] = useState(false);
   const [messageBoxContent, setMessageBoxContent] = useState("");
+  const [currentQuizQuestions, setCurrentQuizQuestions] = useState([]); // Questions for current session
+  const [pastQuizResults, setPastQuizResults] = useState([]); // To track past performance
 
-  const quizQuestions = [
-    {
-      question: "Which of these is a common sign of a phishing email?",
-      options: [
-        "A personalized greeting with your name",
-        "A generic greeting like 'Dear Customer'",
-        "Links to official company websites",
-        "Proper grammar and spelling",
-      ],
-      answer: "A generic greeting like 'Dear Customer'",
-    },
-    {
-      question:
-        "What should you do if you receive a suspicious email asking for your password?",
-      options: [
-        "Click the link and enter your password",
-        "Reply to the email asking for more information",
-        "Forward it to a friend to check",
-        "Delete the email and report it if possible",
-      ],
-      answer: "Delete the email and report it if possible",
-    },
-    {
-      question: "What is 'smishing'?",
-      options: [
-        "Phishing attempts via email",
-        "Phishing attempts via phone calls",
-        "Phishing attempts via SMS messages",
-        "Phishing attempts via social media",
-      ],
-      answer: "Phishing attempts via SMS messages",
-    },
-    {
-      question: "Why is it important to hover over links before clicking them?",
-      options: [
-        "To see a preview of the webpage",
-        "To check if the link is broken",
-        "To reveal the actual URL and check for legitimacy",
-        "To save the link for later",
-      ],
-      answer: "To reveal the actual URL and check for legitimacy",
-    },
-    {
-      question: "What is two-factor authentication (2FA)?",
-      options: [
-        "Using two different passwords for one account",
-        "A security process that requires two methods of identification",
-        "Logging in from two different devices simultaneously",
-        "Sharing your password with two trusted friends",
-      ],
-      answer: "A security process that requires two methods of identification",
-    },
-    {
-      question:
-        "A legitimate company asks for your password via email. Is this normal?",
-      options: [
-        "Yes, if they explain why",
-        "No, legitimate companies never ask for passwords via email",
-        "Only if it's from their official support email",
-        "Sometimes, for account verification",
-      ],
-      answer: "No, legitimate companies never ask for passwords via email",
-    },
-    {
-      question:
-        "What is the best way to verify a suspicious phone call claiming to be from your bank?",
-      options: [
-        "Give them your account number to verify",
-        "Call them back on the number they provided",
-        "Hang up and call your bank using a number from their official website or statement",
-        "Tell them you'll call them back later",
-      ],
-      answer:
-        "Hang up and call your bank using a number from their official website or statement",
-    },
-  ];
+  // --- START: Fetch Past Quiz Results ---
+  useEffect(() => {
+    if (!db || !userId) return;
+
+    const appId = process.env.REACT_APP_CANVAS_APP_ID;
+    const quizResultsCollectionRef = collection(
+      db,
+      `artifacts/${appId}/users/${userId}/quiz_results`
+    );
+
+    // Order by timestamp and limit to, say, the last 5 results
+    const q = query(
+      quizResultsCollectionRef,
+      orderBy("timestamp", "desc"),
+      limit(5)
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const results = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setPastQuizResults(results);
+      },
+      (error) => {
+        console.error("Error fetching past quiz results:", error);
+        setMessageBoxContent(
+          "Failed to load past quiz performance. Please check your connection."
+        );
+        setShowMessageBox(true);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [db, userId]);
+  // --- END: Fetch Past Quiz Results ---
+
+  // Function to shuffle array (Fisher-Yates algorithm)
+  const shuffleArray = (array) => {
+    let currentIndex = array.length,
+      randomIndex;
+    while (currentIndex !== 0) {
+      randomIndex = Math.floor(Math.random() * currentIndex);
+      currentIndex--;
+      [array[currentIndex], array[randomIndex]] = [
+        array[randomIndex],
+        array[currentIndex],
+      ];
+    }
+    return array;
+  };
+
+  // Function to start or retake the quiz with random questions
+  const startQuiz = () => {
+    // Shuffle all questions and pick a subset
+    const shuffledQuestions = shuffleArray([...allQuizQuestions]);
+    setCurrentQuizQuestions(
+      shuffledQuestions.slice(0, NUMBER_OF_QUIZ_QUESTIONS)
+    );
+
+    setCurrentQuestionIndex(0);
+    setScore(0);
+    setShowResults(false);
+    setUserAnswers([]);
+  };
+
+  // Start the quiz when the component mounts initially
+  useEffect(() => {
+    startQuiz();
+  }, []); // Run once on component mount
 
   const handleAnswerOptionClick = async (selectedOption) => {
-    const currentQuestion = quizQuestions[currentQuestionIndex];
+    const currentQuestion = currentQuizQuestions[currentQuestionIndex];
     const isCorrect = selectedOption === currentQuestion.answer;
 
     const newAnswer = {
@@ -106,7 +117,7 @@ const QuizPage = ({ db, userId }) => {
     setScore(newScore);
 
     const nextQuestion = currentQuestionIndex + 1;
-    if (nextQuestion < quizQuestions.length) {
+    if (nextQuestion < currentQuizQuestions.length) {
       setCurrentQuestionIndex(nextQuestion);
     } else {
       setShowResults(true);
@@ -120,7 +131,7 @@ const QuizPage = ({ db, userId }) => {
           );
           await addDoc(quizCollectionRef, {
             score: newScore,
-            totalQuestions: quizQuestions.length,
+            totalQuestions: currentQuizQuestions.length,
             answers: updatedUserAnswers, // Log the complete set of answers
             timestamp: serverTimestamp(),
           });
@@ -135,25 +146,25 @@ const QuizPage = ({ db, userId }) => {
     }
   };
 
-  const resetQuiz = () => {
-    setCurrentQuestionIndex(0);
-    setScore(0);
-    setShowResults(false);
-    setUserAnswers([]);
-  };
-
   return (
     <section className="bg-purple-50 dark:bg-purple-950 p-6 rounded-xl shadow-lg">
       <h2 className="text-3xl font-bold text-purple-800 dark:text-purple-300 mb-6 text-center">
         Test Your Phishing Awareness
       </h2>
-      {showResults ? (
+
+      {currentQuizQuestions.length === 0 ? (
+        <div className="text-center">
+          <p className="text-lg text-gray-700 dark:text-gray-300 mb-4">
+            Loading quiz questions...
+          </p>
+        </div>
+      ) : showResults ? (
         <div className="text-center">
           <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-200">
             Quiz Results
           </h3>
           <p className="text-lg mb-4 text-gray-700 dark:text-gray-300">
-            You scored {score} out of {quizQuestions.length}!
+            You scored {score} out of {currentQuizQuestions.length}!
           </p>
           <div className="space-y-4 mb-6 text-left max-h-96 overflow-y-auto custom-scrollbar p-2">
             {userAnswers.map((answer, index) => (
@@ -186,22 +197,58 @@ const QuizPage = ({ db, userId }) => {
             ))}
           </div>
           <button
-            onClick={resetQuiz}
+            onClick={startQuiz} // Changed to startQuiz
             className="px-6 py-3 bg-purple-600 text-white rounded-lg shadow-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 transition duration-200 ease-in-out"
           >
             Retake Quiz
           </button>
+
+          {/* --- START: Past Performance Tracker --- */}
+          {pastQuizResults.length > 0 && (
+            <div className="mt-8 text-left border-t pt-4 border-gray-300 dark:border-gray-700">
+              <h4 className="text-lg font-semibold mb-3 text-gray-800 dark:text-gray-200">
+                Your Past Quiz Performance
+              </h4>
+              <ul className="space-y-2">
+                {pastQuizResults.map((result) => (
+                  <li
+                    key={result.id}
+                    className="p-3 bg-gray-100 dark:bg-gray-800 rounded-lg shadow-sm"
+                  >
+                    <p className="text-gray-700 dark:text-gray-300">
+                      Score:{" "}
+                      <span className="font-bold">
+                        {result.score} / {result.totalQuestions}
+                      </span>{" "}
+                      (
+                      {new Date(
+                        result.timestamp?.toDate()
+                      ).toLocaleDateString()}{" "}
+                      {new Date(
+                        result.timestamp?.toDate()
+                      ).toLocaleTimeString()}
+                      )
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                Showing last {pastQuizResults.length} attempts.
+              </p>
+            </div>
+          )}
+          {/* --- END: Past Performance Tracker --- */}
         </div>
       ) : (
         <div>
           <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-200">
-            Question {currentQuestionIndex + 1}/{quizQuestions.length}
+            Question {currentQuestionIndex + 1}/{currentQuizQuestions.length}
           </h3>
           <p className="text-lg mb-6 text-gray-700 dark:text-gray-300">
-            {quizQuestions[currentQuestionIndex]?.question}
+            {currentQuizQuestions[currentQuestionIndex]?.question}
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {quizQuestions[currentQuestionIndex]?.options.map(
+            {currentQuizQuestions[currentQuestionIndex]?.options.map(
               (option, index) => (
                 <button
                   key={index}

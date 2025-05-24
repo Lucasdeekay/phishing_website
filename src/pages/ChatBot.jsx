@@ -13,14 +13,25 @@ import MessageBox from "../utils/MessageBox";
 const ChatbotPage = ({ db, userId }) => {
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState([]);
-  const [isTyping, setIsTyping] = useState(false);
+  const [isTyping, setIsTyping] = useState(true); // Set to true initially for intro message
   const messagesEndRef = useRef(null);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
+  // Define the bot's introductory message
+  const introMessage = {
+    role: "bot",
+    text: "Hi there! I'm your Phishing Expert bot. I can answer questions about phishing, smishing, vishing, common scams, and how to stay safe online. What would you like to know?",
+  };
+
   // Fetch chat history from Firestore on component mount
   useEffect(() => {
-    if (!db || !userId) return;
+    if (!db || !userId) {
+      setErrorMessage("Chat service not available. Please try again later.");
+      setShowError(true);
+      setIsTyping(false); // Stop typing indicator if service isn't ready
+      return;
+    }
 
     const appId = process.env.REACT_APP_CANVAS_APP_ID;
     const chatCollectionRef = collection(
@@ -33,26 +44,42 @@ const ChatbotPage = ({ db, userId }) => {
       q,
       (snapshot) => {
         const history = snapshot.docs.map((doc) => doc.data());
-        setChatHistory(history);
+        // If chat history is empty after fetching, add the intro message
+        if (history.length === 0) {
+          setChatHistory([introMessage]);
+          // Also log the intro message to Firestore if it's a truly new chat
+          addDoc(chatCollectionRef, {
+            ...introMessage,
+            timestamp: serverTimestamp(),
+          }).catch((logError) =>
+            console.error("Error logging intro message:", logError)
+          );
+        } else {
+          setChatHistory(history);
+        }
+        setIsTyping(false); // Stop typing indicator once history is loaded/intro message is set
       },
       (error) => {
         console.error("Error fetching chat history:", error);
-        setErrorMessage("Failed to load chat history. Please try again.");
+        setErrorMessage(
+          "Failed to load chat history. Please refresh the page."
+        );
         setShowError(true);
+        setIsTyping(false); // Stop typing indicator on error
       }
     );
 
     return () => unsubscribe();
-  }, [db, userId]);
+  }, [db, userId]); // Dependency on introMessage isn't strictly necessary as it's constant, but can be added if it were dynamic
 
-  // Scroll to bottom of chat history
+  // Scroll to bottom of chat history whenever it updates
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory]);
 
   const sendMessage = async () => {
     if (!message.trim()) {
-      setErrorMessage("Please enter a message.");
+      setErrorMessage("Please type a message before sending.");
       setShowError(true);
       return;
     }
@@ -63,12 +90,13 @@ const ChatbotPage = ({ db, userId }) => {
     }
 
     const userMessage = message.trim();
+    // Optimistically add user message to UI
     setChatHistory((prev) => [
       ...prev,
       { role: "user", text: userMessage, timestamp: serverTimestamp() },
     ]);
-    setMessage("");
-    setIsTyping(true);
+    setMessage(""); // Clear input field
+    setIsTyping(true); // Show typing indicator for bot's response
 
     try {
       // Log user message to Firestore
@@ -85,12 +113,15 @@ const ChatbotPage = ({ db, userId }) => {
 
       // Prepare payload for Gemini API
       // Filter out any messages without a 'text' property or where text is empty
-      let apiChatHistory = chatHistory
-        .filter((msg) => msg.text)
+      // Also, explicitly map to { role, parts: [{ text }] } structure for Gemini
+      const apiChatHistory = chatHistory
+        .filter((msg) => msg.text) // Ensure 'text' property exists and is not empty
         .map((msg) => ({
           role: msg.role === "user" ? "user" : "model",
           parts: [{ text: msg.text }],
         }));
+
+      // Add the current user message to the API history payload
       apiChatHistory.push({ role: "user", parts: [{ text: userMessage }] });
 
       const payload = { contents: apiChatHistory };
@@ -102,7 +133,7 @@ const ChatbotPage = ({ db, userId }) => {
           "Gemini API Key is missing. Please check your .env file."
         );
       }
-      
+
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -120,7 +151,8 @@ const ChatbotPage = ({ db, userId }) => {
 
       const result = await response.json();
 
-      let botResponseText = "I'm sorry, I couldn't generate a response.";
+      let botResponseText =
+        "I'm sorry, I couldn't generate a response at the moment. Please try asking something else.";
       if (
         result.candidates &&
         result.candidates.length > 0 &&
@@ -131,6 +163,7 @@ const ChatbotPage = ({ db, userId }) => {
         botResponseText = result.candidates[0].content.parts[0].text;
       }
 
+      // Add bot's response to UI
       setChatHistory((prev) => [
         ...prev,
         { role: "bot", text: botResponseText, timestamp: serverTimestamp() },
@@ -145,19 +178,20 @@ const ChatbotPage = ({ db, userId }) => {
     } catch (error) {
       console.error("Error sending message to Gemini API or Firestore:", error);
       setErrorMessage(
-        "Oops! Something went wrong with the chatbot. Please try again later."
+        "Oops! I'm having trouble responding right now. Please try again later."
       );
       setShowError(true);
+      // Add a generic error message to chat history if something goes wrong
       setChatHistory((prev) => [
         ...prev,
         {
           role: "bot",
-          text: "Oops! Something went wrong. Please try again later.",
+          text: "I encountered an issue. Please try again later.",
           timestamp: serverTimestamp(),
         },
       ]);
     } finally {
-      setIsTyping(false);
+      setIsTyping(false); // Hide typing indicator
     }
   };
 
