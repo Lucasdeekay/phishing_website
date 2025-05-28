@@ -31,6 +31,7 @@ A comprehensive web application designed to educate users about phishing attacks
 
 The chatbot operates via a client-side React application that communicates with the Google Gemini API through a direct API call (for local development). For a production environment, an API Gateway and a serverless function would typically mediate this interaction for enhanced security and scalability.
 
+```bash
 [User (Web Browser)]
 ↓
 (HTTPS)
@@ -46,6 +47,7 @@ The chatbot operates via a client-side React application that communicates with 
 [Frontend (React App)]
 ↓
 [User (Sees Response)]
+```
 
 
 **Flow Description:**
@@ -85,6 +87,7 @@ Open your terminal or command prompt and run:
 ```bash
 git clone <repository-url> # Replace <repository-url> with the actual URL of your repository
 cd phishing_website
+```
 
 ### 2. Install Dependencies
 
@@ -94,6 +97,7 @@ Navigate into the project directory and install the necessary Node.js packages:
 npm install
 # or if you prefer yarn:
 # yarn install
+```
 
 ### 3. Firebase Setup (Crucial for Chat & Quiz Data)
 
@@ -151,6 +155,7 @@ Create a `.env` file in the **root directory** of your project (`phishing_websit
 # In your project root, create a file named .env
 touch .env # On macOS/Linux
 # or manually create it on Windows
+```
 
 Open `.env` and add your Firebase and Gemini API keys. **Remember to replace the placeholder values with your actual keys**
 
@@ -169,12 +174,14 @@ REACT_APP_CANVAS_APP_ID="phishing-awareness-hub-local"
 
 # Google Gemini API Key (from Google AI Studio)
 REACT_APP_GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+```
 
 **Important:** Add `.env` to your `.gitignore` file to prevent it from being committed to version control:
 
 ```bash
 # .gitignore
 .env
+```
 
 ---
 
@@ -186,6 +193,7 @@ Start the development server:
 npm start
 # or
 # yarn start
+```
 This will open the application in your default web browser at http://localhost:3000 (or another available port).
 
 ---
